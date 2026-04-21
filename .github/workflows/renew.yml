@@ -14,33 +14,46 @@ jobs:
           python-version: "3.12"
 
       - name: Install requests
-        run: pip install requests
+        run: pip install requests -q
 
-      - name: Run renew script
+      - name: Run Renew Script
         env:
           DPDNS_TOKEN: ${{ secrets.DPDNS_TOKEN }}
         run: |
+          python - << 'EOF'
           import os
           import requests
 
-          token = os.environ['DPDNS_TOKEN']
+          token = os.environ.get("DPDNS_TOKEN")
+          if not token:
+              print("❌ 未设置 DPDNS_TOKEN 密钥！")
+              exit(1)
+
           headers = {"Authorization": f"Bearer {token}"}
 
-          domains_resp = requests.get("https://api.dpdns.org/v1/domains", headers=headers)
-          if domains_resp.status_code != 200:
-              print(f"❌ 获取域名失败！状态码：{domains_resp.status_code}")
+          # 获取所有域名
+          try:
+              r = requests.get("https://api.dpdns.org/v1/domains", headers=headers, timeout=10)
+              r.raise_for_status()
+              domains = r.json().get("domains", [])
+              print(f"✅ 找到 {len(domains)} 个域名")
+          except Exception as e:
+              print(f"❌ 获取域名失败: {e}")
               exit(1)
-          
-          domains = domains_resp.json().get("domains", [])
-          print(f"✅ 找到 {len(domains)} 个域名，开始续期...")
 
+          # 续期每个域名
+          success = 0
           for domain in domains:
               domain_id = domain["id"]
               domain_name = domain["name"]
-              renew_url = f"https://api.dpdns.org/v1/domains/{domain_id}/renew"
-              renew_resp = requests.post(renew_url, headers=headers
-              
-              if renew_resp.status_code in [200, 201]:
-                  print(f"✅ 续期成功：{domain_name}")
-              else:
-                  print(f"❌ 续期失败：{domain_name} | 状态码：{renew_resp.status_code} | 响应：{renew_resp.text}")
+              try:
+                  renew_url = f"https://api.dpdns.org/v1/domains/{domain_id}/renew"
+                  r = requests.post(renew_url, headers=headers, timeout=10)
+                  r.raise_for_status()
+                  print(f"✅ 续期成功: {domain_name}")
+                  success += 1
+              except Exception as e:
+                  print(f"❌ 续期失败: {domain_name} | 错误: {e}")
+
+          print(f"\n🎉 续期完成！成功: {success}/{len(domains)}")
+          EOF
